@@ -9,7 +9,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -20,15 +22,24 @@
       {
         "command": "ycode.explainArchitecture",
         "title": "Ycode: Explain Project Architecture"
+      },
+      {
+        "command": "ycode.showMenu",
+        "title": "Ycode: Show AI Menu"
       }
     ],
     "configuration": {
       "title": "Ycode AI",
       "properties": {
-        "ycode.apiKey": {
+        "ycode.explainApiKey": {
           "type": "string",
           "default": "",
-          "description": "API Key for the AI model (e.g. Gemini)"
+          "description": "API Key for explaining code changes"
+        },
+        "ycode.architectureApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API Key for explaining project architecture"
         }
       }
     }
