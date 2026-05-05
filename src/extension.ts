@@ -149,7 +149,8 @@ export function activate(context: vscode.ExtensionContext) {
 	const showMenuCommand = vscode.commands.registerCommand('ycode.showMenu', async () => {
 		const selection = await vscode.window.showQuickPick([
 			{ label: '$(git-pull-request) Explain Recent Changes', description: 'Analyze your uncommitted git diffs', target: 'ycode.explainChanges' },
-			{ label: '$(file-directory) Explain Architecture', description: 'Analyze the project folder structure', target: 'ycode.explainArchitecture' }
+			{ label: '$(file-directory) Explain Architecture', description: 'Analyze the project folder structure', target: 'ycode.explainArchitecture' },
+			{ label: '$(clippy) Simplify Copied Text', description: 'Explain copied text in simple terms', target: 'ycode.explainCopiedText' }
 		], { placeHolder: 'What would you like Ycode AI to do?' });
 
 		if (selection) {
@@ -334,7 +335,56 @@ ${tree}${dependenciesStr}`;
 		}
 	});
 
-	context.subscriptions.push(explainChangesCommand, explainArchitectureCommand);
+	const explainCopiedTextCommand = vscode.commands.registerCommand('ycode.explainCopiedText', async () => {
+		const config = vscode.workspace.getConfiguration('ycode');
+		const apiKey = config.get<string>('explainApiKey');
+
+		if (!apiKey) {
+			vscode.window.showErrorMessage('Please configure your Ycode Explain API key in settings.');
+			return;
+		}
+
+		const clipboardText = await vscode.env.clipboard.readText();
+		if (!clipboardText || clipboardText.trim() === '') {
+			vscode.window.showErrorMessage('Your clipboard is empty! Please copy some text first.');
+			return;
+		}
+
+		const panel = getWebviewPanel('Ycode AI: Simplify Text');
+		updateWebview(panel, '<div class="loading"><div class="spinner"></div><span>Reading clipboard and analyzing text...</span></div>');
+
+		try {
+			const prompt = `You are an expert technical writer and educator. A user has copied the following complex text and needs you to explain it.
+Please simplify this text, explain it in easier terms, and expand on any complex concepts in detail.
+
+Copied Text:
+${clipboardText}`;
+
+			const { GoogleGenAI } = await import('@google/genai');
+			const ai = new GoogleGenAI({ apiKey: apiKey });
+
+			const response = await ai.models.generateContent({
+				model: 'gemini-2.5-flash-lite',
+				contents: prompt,
+			});
+
+			if (response.text) {
+				const { marked } = await import('marked');
+				const parsedHtml = await marked.parse(response.text);
+				updateWebview(panel, parsedHtml);
+				vscode.window.showInformationMessage('Explanation complete!');
+			} else {
+				updateWebview(panel, '<h3>Error</h3><p>Failed to generate an explanation.</p>');
+				vscode.window.showErrorMessage('Failed to generate an explanation.');
+			}
+		} catch (error: any) {
+			vscode.window.showErrorMessage(`Failed to explain text: ${error.message || error}`);
+			console.error(error);
+			updateWebview(panel, `<h3>Error</h3><p>${error.message || error}</p>`);
+		}
+	});
+
+	context.subscriptions.push(explainChangesCommand, explainArchitectureCommand, explainCopiedTextCommand);
 }
 
 export function deactivate() {}

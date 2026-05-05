@@ -24,6 +24,10 @@
         "title": "Ycode: Explain Project Architecture"
       },
       {
+        "command": "ycode.explainCopiedText",
+        "title": "Ycode: Explain Walkthrough"
+      },
+      {
         "command": "ycode.showMenu",
         "title": "Ycode: Show AI Menu"
       }
