@@ -5,6 +5,96 @@ import * as util from 'util';
 
 const exec = util.promisify(cp.exec);
 
+let activePanel: vscode.WebviewPanel | undefined;
+
+function getWebviewPanel(title: string): vscode.WebviewPanel {
+	if (activePanel) {
+		activePanel.title = title;
+		activePanel.reveal(vscode.ViewColumn.One);
+	} else {
+		activePanel = vscode.window.createWebviewPanel(
+			'ycodeAI',
+			title,
+			vscode.ViewColumn.Beside, // Open in a split tab
+			{ enableScripts: true }
+		);
+		activePanel.onDidDispose(() => {
+			activePanel = undefined;
+		});
+	}
+	return activePanel;
+}
+
+function updateWebview(panel: vscode.WebviewPanel, contentHtml: string) {
+	panel.webview.html = `
+		<!DOCTYPE html>
+		<html lang="en">
+		<head>
+			<meta charset="UTF-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1.0">
+			<style>
+				body {
+					font-family: var(--vscode-font-family);
+					padding: 20px 40px;
+					line-height: 1.6;
+					color: var(--vscode-editor-foreground);
+					background-color: var(--vscode-editor-background);
+					max-width: 900px;
+					margin: 0 auto;
+				}
+				h1, h2, h3 {
+					color: var(--vscode-editor-foreground);
+					border-bottom: 1px solid var(--vscode-panel-border);
+					padding-bottom: 8px;
+					margin-top: 24px;
+				}
+				pre {
+					background-color: var(--vscode-textCodeBlock-background);
+					padding: 16px;
+					border-radius: 6px;
+					overflow-x: auto;
+				}
+				code {
+					font-family: var(--vscode-editor-font-family);
+				}
+				p > code, li > code {
+					background-color: var(--vscode-textCodeBlock-background);
+					padding: 2px 4px;
+					border-radius: 4px;
+				}
+				blockquote {
+					border-left: 4px solid var(--vscode-textLink-foreground);
+					padding: 10px 16px;
+					margin-left: 0;
+					color: var(--vscode-textBlockQuote-foreground);
+					background: var(--vscode-textBlockQuote-background);
+				}
+				.loading {
+					display: flex;
+					align-items: center;
+					gap: 12px;
+					font-size: 16px;
+					color: var(--vscode-descriptionForeground);
+					margin-top: 40px;
+				}
+				.spinner {
+					width: 24px;
+					height: 24px;
+					border: 3px solid var(--vscode-panel-border);
+					border-top: 3px solid var(--vscode-textLink-foreground);
+					border-radius: 50%;
+					animation: spin 1s linear infinite;
+				}
+				@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+			</style>
+		</head>
+		<body>
+			${contentHtml}
+		</body>
+		</html>
+	`;
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "Ycode" is now active!');
 
@@ -68,9 +158,8 @@ export function activate(context: vscode.ExtensionContext) {
 				return; // User cancelled
 			}
 
-			outputChannel.appendLine(`\n--- Ycode AI: ${actionSelection.label} ---`);
-			outputChannel.show();
-			vscode.window.showInformationMessage('Gathering data and analyzing...');
+			const panel = getWebviewPanel(`Ycode AI: ${actionSelection.label}`);
+			updateWebview(panel, '<div class="loading"><div class="spinner"></div><span>Gathering data and analyzing...</span></div>');
 
 			let prompt = '';
 			let finalDiff = '';
@@ -113,7 +202,7 @@ export function activate(context: vscode.ExtensionContext) {
 				finalDiff = specificDiff;
 				
 				prompt = `You are an expert software developer. A user has a question about the recent changes to the file "${selectedFile}".\n\nUser Question: ${userQuestion}\n\nFile Diff:\n${finalDiff}\n\nPlease answer the user's question clearly.`;
-				outputChannel.appendLine(`File: ${selectedFile}\nQuestion: ${userQuestion}\n`);
+				updateWebview(panel, '<div class="loading"><div class="spinner"></div><span>Thinking about your question...</span></div>');
 			}
 
 			const { GoogleGenAI } = await import('@google/genai');
@@ -125,10 +214,12 @@ export function activate(context: vscode.ExtensionContext) {
 			});
 
 			if (response.text) {
-				outputChannel.appendLine('');
-				outputChannel.appendLine(response.text);
-				vscode.window.showInformationMessage('Explanation complete! Check the Ycode AI Output panel.');
+				const { marked } = await import('marked');
+				const parsedHtml = await marked.parse(response.text);
+				updateWebview(panel, parsedHtml);
+				vscode.window.showInformationMessage('Explanation complete!');
 			} else {
+				updateWebview(panel, '<h3>Error</h3><p>Failed to generate an explanation.</p>');
 				vscode.window.showErrorMessage('Failed to generate an explanation.');
 			}
 			
