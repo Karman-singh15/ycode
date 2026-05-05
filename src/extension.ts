@@ -1,25 +1,79 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import * as cp from 'child_process';
+import * as util from 'util';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
+
+const exec = util.promisify(cp.exec);
+
 export function activate(context: vscode.ExtensionContext) {
+	console.log('Congratulations, your extension "Ycode" is now active!');
 
-	// Use the VS Code API to output diagnostic information when the extension is activated
-	vscode.window.showInformationMessage('Congratulations, your extension "ycode" is now active!');
+	const outputChannel = vscode.window.createOutputChannel('Ycode AI');
+	context.subscriptions.push(outputChannel);
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('ycode.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from ycode!');
+	const explainChangesCommand = vscode.commands.registerCommand('ycode.explainChanges', async () => {
+		vscode.window.showInformationMessage('Gathering recent changes to explain...');
+		
+		const config = vscode.workspace.getConfiguration('ycode');
+		const apiKey = config.get<string>('apiKey');
+
+		if (!apiKey) {
+			vscode.window.showErrorMessage('Please configure your Ycode API key in settings.');
+			return;
+		}
+
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (!workspaceFolders || workspaceFolders.length === 0) {
+			vscode.window.showErrorMessage('No workspace folder open.');
+			return;
+		}
+
+		const cwd = workspaceFolders[0].uri.fsPath;
+		try {
+			// Get uncommitted changes (both staged and unstaged) compared to HEAD
+			const { stdout, stderr } = await exec('git diff HEAD', { cwd });
+			
+			if (stderr) {
+				console.error('Git diff error:', stderr);
+			}
+
+			if (!stdout.trim()) {
+				vscode.window.showInformationMessage('No recent changes found to explain.');
+				return;
+			}
+
+			outputChannel.appendLine('--- Recent Changes ---');
+			outputChannel.appendLine(stdout);
+			outputChannel.appendLine('\n--- Explaining Changes (via AI) ---');
+			outputChannel.show();
+
+			const { GoogleGenAI } = await import('@google/genai');
+			const ai = new GoogleGenAI({ apiKey: apiKey });
+			const prompt = `You are an expert software developer. Explain the following git diff in simple, easy-to-understand language. Focus on the 'why' and 'what changed', rather than just narrating the code line by line.\n\nDiff:\n${stdout}`;
+
+			const response = await ai.models.generateContent({
+				model: 'gemini-2.5-flash',
+				contents: prompt,
+			});
+
+			if (response.text) {
+				outputChannel.appendLine(response.text);
+				vscode.window.showInformationMessage('Explanation complete! Check the Ycode AI Output panel.');
+			} else {
+				vscode.window.showErrorMessage('Failed to generate an explanation.');
+			}
+			
+		} catch (error) {
+			vscode.window.showErrorMessage('Failed to retrieve or explain changes.');
+			console.error(error);
+		}
 	});
 
-	context.subscriptions.push(disposable);
+	const explainArchitectureCommand = vscode.commands.registerCommand('ycode.explainArchitecture', () => {
+		vscode.window.showInformationMessage('Analyzing project architecture...');
+	});
+
+	context.subscriptions.push(explainChangesCommand, explainArchitectureCommand);
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {}
