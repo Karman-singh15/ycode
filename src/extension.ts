@@ -95,14 +95,18 @@ export function activate(context: vscode.ExtensionContext) {
 					placeHolder: 'Select a file to query'
 				});
 
-				if (!selectedFile) return;
+				if (!selectedFile){
+					return;
+				}
 
 				const userQuestion = await vscode.window.showInputBox({
 					prompt: `What is your doubt or question about ${selectedFile}?`,
 					placeHolder: 'e.g. Why was this function removed?'
 				});
 
-				if (!userQuestion) return;
+				if (!userQuestion) {
+					return;
+				}
 
 				// Get diff for just that file
 				const { stdout: specificDiff } = await exec(`git diff HEAD -- "${selectedFile}"`, { cwd });
