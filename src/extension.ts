@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as util from 'util';
+import * as fs from 'fs';
+import * as path from 'path';
 
 
 const exec = util.promisify(cp.exec);
@@ -93,6 +95,40 @@ function updateWebview(panel: vscode.WebviewPanel, contentHtml: string) {
 		</body>
 		</html>
 	`;
+}
+
+function generateTree(dir: string, prefix = '', depth = 0, maxDepth = 4): string {
+	if (depth > maxDepth) return '';
+	
+	let items: fs.Dirent[] = [];
+	try {
+		items = fs.readdirSync(dir, { withFileTypes: true });
+	} catch (e) {
+		return '';
+	}
+
+	const ignoreList = ['node_modules', '.git', 'dist', 'out', 'build', '.vscode', '.expo'];
+	const filteredItems = items.filter(item => !ignoreList.includes(item.name));
+
+	// Sort directories first, then files
+	filteredItems.sort((a, b) => {
+		if (a.isDirectory() && !b.isDirectory()) return -1;
+		if (!a.isDirectory() && b.isDirectory()) return 1;
+		return a.name.localeCompare(b.name);
+	});
+
+	let treeStr = '';
+	filteredItems.forEach((item, index) => {
+		const isLast = index === filteredItems.length - 1;
+		const connector = isLast ? '└── ' : '├── ';
+		treeStr += `${prefix}${connector}${item.name}\n`;
+		
+		if (item.isDirectory()) {
+			const newPrefix = prefix + (isLast ? '    ' : '│   ');
+			treeStr += generateTree(path.join(dir, item.name), newPrefix, depth + 1, maxDepth);
+		}
+	});
+	return treeStr;
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -229,7 +265,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
-	const explainArchitectureCommand = vscode.commands.registerCommand('ycode.explainArchitecture', () => {
+	const explainArchitectureCommand = vscode.commands.registerCommand('ycode.explainArchitecture', async () => {
 		const config = vscode.workspace.getConfiguration('ycode');
 		const apiKey = config.get<string>('architectureApiKey');
 
@@ -238,7 +274,64 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
-		vscode.window.showInformationMessage('Analyzing project architecture...');
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (!workspaceFolders || workspaceFolders.length === 0) {
+			vscode.window.showErrorMessage('No workspace folder open.');
+			return;
+		}
+
+		const cwd = workspaceFolders[0].uri.fsPath;
+		
+		const panel = getWebviewPanel('Ycode AI: Architecture Analysis');
+		updateWebview(panel, '<div class="loading"><div class="spinner"></div><span>Scanning workspace and analyzing architecture...</span></div>');
+
+		try {
+			// Generate the tree
+			const tree = generateTree(cwd);
+			
+			// Try to read package.json dependencies
+			let dependenciesStr = '';
+			const packageJsonPath = path.join(cwd, 'package.json');
+			if (fs.existsSync(packageJsonPath)) {
+				try {
+					const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+					const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+					if (Object.keys(deps).length > 0) {
+						dependenciesStr = `\n\nProject Dependencies:\n${JSON.stringify(deps, null, 2)}`;
+					}
+				} catch (e) {
+					// Ignore parsing errors
+				}
+			}
+
+			const prompt = `You are an expert software architect. Below is the directory structure of my project, along with its dependencies (if any).
+Please explain the overall architecture, what this project likely does, and give a detailed insight into how the code is organized and working based on this structure.
+
+Directory Structure:
+${tree}${dependenciesStr}`;
+
+			const { GoogleGenAI } = await import('@google/genai');
+			const ai = new GoogleGenAI({ apiKey: apiKey });
+
+			const response = await ai.models.generateContent({
+				model: 'gemini-2.5-flash-lite',
+				contents: prompt,
+			});
+
+			if (response.text) {
+				const { marked } = await import('marked');
+				const parsedHtml = await marked.parse(response.text);
+				updateWebview(panel, parsedHtml);
+				vscode.window.showInformationMessage('Architecture analysis complete!');
+			} else {
+				updateWebview(panel, '<h3>Error</h3><p>Failed to generate an explanation.</p>');
+				vscode.window.showErrorMessage('Failed to generate an explanation.');
+			}
+		} catch (error: any) {
+			vscode.window.showErrorMessage(`Failed to analyze architecture: ${error.message || error}`);
+			console.error(error);
+			updateWebview(panel, `<h3>Error</h3><p>${error.message || error}</p>`);
+		}
 	});
 
 	context.subscriptions.push(explainChangesCommand, explainArchitectureCommand);
